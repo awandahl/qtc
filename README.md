@@ -7,19 +7,31 @@ sudo apt-get install poppler-utils
 
 pdfdetach -saveall 1970-tal.pdf
 
-### Build JBIG2 encoder
+
+### Make smaller PDFs
+Message from ocrmypdf:  
+```
+The output file size is 6.16× larger than the input file.                                                                                                         _validation.py:351
+Possible reasons for this include:                                                                                                                                                  
+--force-ocr was issued, causing transcoding.                                                                                                                                        
+The optional dependency 'jbig2' was not found, so some image optimizations could not be attempted.                                                                                  
+PDF/A conversion was enabled. (Try `--output-type pdf`.)    
+```
+
+#### Build JBIG2 encoder (make smaller PDFs)
 https://ocrmypdf.readthedocs.io/en/latest/jbig2.html
 
 ```
 [sudo] apt install autotools-dev automake libtool libleptonica-dev
 ```
-```git clone https://github.com/agl/jbig2enc
+```
+git clone https://github.com/agl/jbig2enc
 cd jbig2enc
 ./autogen.sh
 ./configure && make
 [sudo] make install
-``
-
+```
+### Run OCR and extract text
 
 ```
 #!/bin/bash
