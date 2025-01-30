@@ -32,7 +32,7 @@ for pdf in *.pdf; do
         # OCR the single page
         ocrmypdf -l swe+eng --force-ocr "ocr_output/$base_name/page_${page}.pdf" "ocr_output/$base_name/ocr_page_${page}.pdf"
         
-        # Extract text from OCR'd PDF
+        # Extract and save text from page
         pdftotext -layout "ocr_output/$base_name/ocr_page_${page}.pdf" "ocr_output/$base_name/page_${page}.txt"
         
         # Remove temporary PDF files
