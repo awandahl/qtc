@@ -3,25 +3,25 @@
 
 sudo apt-get install poppler-utils
 
-### Unpack portfolio
+### Unpack decade portfolio
 
 pdfdetach -saveall 1970-tal.pdf
 
-´´´
+```
 #!/bin/bash
 
 # Create a directory for the output
-mkdir -p ocr_output
+mkdir -p qtc_ocr_output
 
-# Loop through all PDF files in the current directory
+# Loop through all QTC issue files in the current directory
 for pdf in *.pdf; do
-    # Get the base name of the PDF file (without extension)
+    # Get the base name (issue name) of the PDF file (without extension)
     base_name=$(basename "$pdf" .pdf)
     
-    # Create a directory for this PDF's output
+    # Create a directory for this issue's output
     mkdir -p "ocr_output/$base_name"
     
-    # Get the number of pages in the PDF
+    # Get the number of pages in the issue
     num_pages=$(pdfinfo "$pdf" | grep Pages | awk '{print $2}')
     
     # Process each page separately
@@ -30,7 +30,7 @@ for pdf in *.pdf; do
         pdfseparate -f $page -l $page "$pdf" "ocr_output/$base_name/page_${page}.pdf"
         
         # OCR the single page
-        ocrmypdf --force-ocr "ocr_output/$base_name/page_${page}.pdf" "ocr_output/$base_name/ocr_page_${page}.pdf"
+        ocrmypdf -l swe+eng --force-ocr "ocr_output/$base_name/page_${page}.pdf" "ocr_output/$base_name/ocr_page_${page}.pdf"
         
         # Extract text from OCR'd PDF
         pdftotext -layout "ocr_output/$base_name/ocr_page_${page}.pdf" "ocr_output/$base_name/page_${page}.txt"
@@ -39,5 +39,5 @@ for pdf in *.pdf; do
         rm "ocr_output/$base_name/page_${page}.pdf" "ocr_output/$base_name/ocr_page_${page}.pdf"
     done
 done
-``
+```
 
