@@ -19,7 +19,7 @@ for pdf in *.pdf; do
     base_name=$(basename "$pdf" .pdf)
     
     # Create a directory for this issue's output
-    mkdir -p "ocr_output/$base_name"
+    mkdir -p "qtc_ocr_output/$base_name"
     
     # Get the number of pages in the issue
     num_pages=$(pdfinfo "$pdf" | grep Pages | awk '{print $2}')
@@ -27,16 +27,16 @@ for pdf in *.pdf; do
     # Process each page separately
     for ((page=1; page<=num_pages; page++)); do
         # Extract single page from PDF
-        pdfseparate -f $page -l $page "$pdf" "ocr_output/$base_name/page_${page}.pdf"
+        pdfseparate -f $page -l $page "$pdf" "qtc_ocr_output/$base_name/page_${page}.pdf"
         
         # OCR the single page
-        ocrmypdf -l swe+eng --force-ocr "ocr_output/$base_name/page_${page}.pdf" "ocr_output/$base_name/ocr_page_${page}.pdf"
+        ocrmypdf -l swe+eng --force-ocr "qtc_ocr_output/$base_name/page_${page}.pdf" "qtc_ocr_output/$base_name/ocr_page_${page}.pdf"
         
         # Extract and save text from page
-        pdftotext -layout "ocr_output/$base_name/ocr_page_${page}.pdf" "ocr_output/$base_name/page_${page}.txt"
+        pdftotext -layout "qtc_ocr_output/$base_name/ocr_page_${page}.pdf" "qtc_ocr_output/$base_name/page_${page}.txt"
         
         # Remove temporary PDF files
-        rm "ocr_output/$base_name/page_${page}.pdf" "ocr_output/$base_name/ocr_page_${page}.pdf"
+        rm "qtc_ocr_output/$base_name/page_${page}.pdf" "qtc_ocr_output/$base_name/ocr_page_${page}.pdf"
     done
 done
 ```
