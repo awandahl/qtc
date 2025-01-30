@@ -7,6 +7,20 @@ sudo apt-get install poppler-utils
 
 pdfdetach -saveall 1970-tal.pdf
 
+### Build JBIG2 encoder
+https://ocrmypdf.readthedocs.io/en/latest/jbig2.html
+
+```
+[sudo] apt install autotools-dev automake libtool libleptonica-dev
+```
+```git clone https://github.com/agl/jbig2enc
+cd jbig2enc
+./autogen.sh
+./configure && make
+[sudo] make install
+``
+
+
 ```
 #!/bin/bash
 
@@ -26,10 +40,10 @@ for pdf in *.pdf; do
     
     # Process each page separately
     for ((page=1; page<=num_pages; page++)); do
-        # Extract single page from PDF
+        # Extract single page from issue PDF
         pdfseparate -f $page -l $page "$pdf" "qtc_ocr_output/$base_name/page_${page}.pdf"
         
-        # OCR the single page
+        # OCR the single page, use Swedish and English, remove old 
         ocrmypdf -l swe+eng --force-ocr "qtc_ocr_output/$base_name/page_${page}.pdf" "qtc_ocr_output/$base_name/ocr_page_${page}.pdf"
         
         # Extract and save text from page
