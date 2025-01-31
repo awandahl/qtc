@@ -5,9 +5,12 @@
 sudo apt-get install poppler-utils
 ```
 
-### Unpack decade portfolio
+### Unpack decade portfolios
 ```
-pdfdetach -saveall 1970-tal.pdf
+pdfdetach -saveall 1920-tal.pdf
+pdfdetach -saveall 1930-tal.pdf
+...
+...
 ```
 
 ### Install ocrmypdf   
