@@ -1,11 +1,14 @@
 # QTC OCR
 
-
+### Install poppler (pdftotext etc)
+```
 sudo apt-get install poppler-utils
+```
 
 ### Unpack decade portfolio
-
+```
 pdfdetach -saveall 1970-tal.pdf
+```
 
 ### Install ocrmypdf   
 ```
