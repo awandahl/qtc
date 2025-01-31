@@ -15,6 +15,10 @@ pdfdetach -saveall 1970-tal.pdf
 apt install ocrmypdf
 ```
 
+### Install Swedish language pack
+```
+sudo apt-get install tesseract-ocr-swe
+```
 
 ### Make smaller PDFs
 Message from ocrmypdf:  
