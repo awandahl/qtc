@@ -7,6 +7,11 @@ sudo apt-get install poppler-utils
 
 pdfdetach -saveall 1970-tal.pdf
 
+### Install ocrmypdf   
+```
+apt install ocrmypdf
+```
+
 
 ### Make smaller PDFs
 Message from ocrmypdf:  
