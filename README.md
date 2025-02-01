@@ -4,7 +4,7 @@ uv venv ocr_env
 
 source ocr_env/bin/activate
 
-uv pip install pymupdf ocrmypdf opencv-python-headless pillow numpy
+uv pip install pymupdf ocrmypdf opencv-python-headless pillow numpy odfpy
 
 
 pdfdetach -saveall 1920-tal.pdf   
