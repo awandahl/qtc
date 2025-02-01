@@ -6,6 +6,8 @@ source ocr_env/bin/activate
 
 uv pip install pymupdf ocrmypdf
 
+uv pip install opencv-python
+
 pdfdetach -saveall 1920-tal.pdf   
 
 
