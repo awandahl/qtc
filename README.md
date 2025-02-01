@@ -87,10 +87,32 @@ import os
 import subprocess
 import logging
 from pathlib import Path
+import fitz  # PyMuPDF
+from odf.opendocument import OpenDocumentText
+from odf.style import Style, TableColumnProperties
+from odf.table import Table, TableColumn, TableRow, TableCell
+from odf.text import P
 import cv2
 import numpy as np
-import fitz  # PyMuPDF
 from PIL import Image
+
+# Configuration
+CONFIG = {
+    'ENABLE_PREPROCESSING': False,
+    'ENABLE_GRAYSCALE': True,
+    'ENABLE_DENOISE': True,
+    'ENABLE_THRESHOLDING': True,
+    'ENABLE_MORPHOLOGY': True,
+    'THRESH_BLOCK_SIZE': 21,
+    'THRESH_C': 10,
+    'LANGUAGES': 'swe+eng',
+    'OPTIMIZE_LEVEL': 3,
+    'FORCE_OCR': True,
+    'SAVE_PREPROCESSED_IMAGES': False,
+    'TRIAL_MODE': True,
+    'TESSERACT_TIMEOUT': 120,
+    'COMPARISON_DOC': True
+}
 
 # Configure logging
 logging.basicConfig(
@@ -99,40 +121,112 @@ logging.basicConfig(
 )
 
 def preprocess_image(image):
-    # Convert to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    """Apply preprocessing steps based on configuration"""
+    if not CONFIG['ENABLE_PREPROCESSING']:
+        return image
     
-    # Noise reduction
-    denoised = cv2.fastNlMeansDenoising(gray, h=10)
+    if CONFIG['ENABLE_GRAYSCALE']:
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
-    # Adaptive thresholding
-    thresh = cv2.adaptiveThreshold(denoised, 255, 
-        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-        cv2.THRESH_BINARY, 21, 10)
+    if CONFIG['ENABLE_DENOISE']:
+        image = cv2.fastNlMeansDenoising(image, h=10)
     
-    # Morphological operations to clean text
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
-    cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    if CONFIG['ENABLE_THRESHOLDING']:
+        image = cv2.adaptiveThreshold(
+            image, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            CONFIG['THRESH_BLOCK_SIZE'],
+            CONFIG['THRESH_C']
+        )
     
-    return cleaned
+    if CONFIG['ENABLE_MORPHOLOGY']:
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
+        image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
+    
+    return image
 
-def process_pdf(pdf_path, output_dir, languages='swe+eng'):
+def create_comparison_doc(issue_dir, base_name):
+    """Create ODT document with original vs new OCR text"""
+    doc = OpenDocumentText()
+    
+    # Create table style
+    table_style = Style(name="ComparisonTable", family="table")
+    col_style = Style(name="TableColumn", family="table-column")
+    col_props = TableColumnProperties(columnwidth="8cm")
+    col_style.addElement(col_props)
+    doc.automaticstyles.addElement(col_style)
+    
+    table = Table(stylename=table_style)
+    table.addElement(TableColumn(numbercolumnsrepeated=2, stylename=col_style))
+    
+    # Add pages in order
+    page_files = sorted(issue_dir.glob(f"{base_name}_page_*.txt"))
+    original_files = sorted(issue_dir.glob(f"original_{base_name}_page_*.txt"))
+    
+    for orig_file, new_file in zip(original_files, page_files):
+        try:
+            with open(orig_file, 'r', encoding='utf-8') as f:
+                original_text = f.read()
+            with open(new_file, 'r', encoding='utf-8') as f:
+                new_text = f.read()
+            
+            row = TableRow()
+            
+            # Original text cell
+            cell = TableCell()
+            p = P(text=original_text)
+            cell.addElement(p)
+            row.addElement(cell)
+            
+            # New OCR cell
+            cell = TableCell()
+            p = P(text=new_text)
+            cell.addElement(p)
+            row.addElement(cell)
+            
+            table.addElement(row)
+        except Exception as e:
+            logging.error(f"Error creating comparison row: {str(e)[:200]}")
+    
+    doc.text.addElement(table)
+    output_path = issue_dir / f"{base_name}_comparison.odt"
+    doc.save(str(output_path))
+    return output_path
+
+def process_pdf(pdf_path, output_dir):
     try:
         base_name = Path(pdf_path).stem
         issue_dir = Path(output_dir) / base_name
         issue_dir.mkdir(parents=True, exist_ok=True)
 
+        original_texts = []
+        
         with fitz.open(pdf_path) as doc:
             total_pages = len(doc)
+            if CONFIG['TRIAL_MODE']:
+                total_pages = min(1, total_pages)
             
+            # First pass: Extract original text
             for page_num in range(total_pages):
                 try:
-                    # Extract page with original DPI metadata
+                    page = doc.load_page(page_num)
+                    original_text = page.get_text()
+                    original_path = issue_dir / f"original_{base_name}_page_{page_num+1}.txt"
+                    original_path.write_text(original_text, encoding='utf-8')
+                    original_texts.append(original_text)
+                except Exception as e:
+                    logging.error(f"Error extracting original text page {page_num+1}: {str(e)[:200]}")
+                    original_texts.append("")
+
+            # Second pass: Process with OCR
+            for page_num in range(total_pages):
+                try:
                     page = doc.load_page(page_num)
                     pix = page.get_pixmap()
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     
-                    # Calculate DPI from PDF dimensions (1 Point = 1/72 inch)
+                    # Calculate DPI
                     pdf_width_pt = page.rect.width
                     pdf_height_pt = page.rect.height
                     dpi_x = pix.width / (pdf_width_pt/72)
@@ -142,52 +236,62 @@ def process_pdf(pdf_path, output_dir, languages='swe+eng'):
                     # Preprocess image
                     preprocessed = preprocess_image(np.array(img))
                     
-                    # Save preprocessed image with DPI metadata using Pillow
-                    preprocessed_pil = Image.fromarray(preprocessed)
-                    preprocessed_path = issue_dir / f"{base_name}_preprocessed_page_{page_num+1}.png"
-                    preprocessed_pil.save(str(preprocessed_path), dpi=(avg_dpi, avg_dpi))
+                    # Save preprocessed image if enabled
+                    preprocessed_path = None
+                    if CONFIG['SAVE_PREPROCESSED_IMAGES']:
+                        preprocessed_path = issue_dir / f"{base_name}_preprocessed_page_{page_num+1}.png"
+                        Image.fromarray(preprocessed).save(str(preprocessed_path), dpi=(avg_dpi, avg_dpi))
 
-                    # OCR with explicit DPI parameter
-                    ocr_pdf = issue_dir / f"{base_name}_ocr_page_{page_num+1}.pdf"
-                    subprocess.run([
+                    # Build OCR command
+                    cmd = [
                         'ocrmypdf',
-                        '-l', languages,
-                        '--image-dpi', str(avg_dpi),  # Explicit DPI setting
+                        '-l', CONFIG['LANGUAGES'],
                         '--force-ocr',
-                        '--optimize', '3',
-                        '--oversample', '300',  # Force minimum 300 DPI processing
-                        '--skip-big', '50',  # Skip images larger than 50 megapixels
-                        str(preprocessed_path),
-                        str(ocr_pdf)
-                    ], check=True)
+                        '--optimize', str(CONFIG['OPTIMIZE_LEVEL']),
+                        '--tesseract-timeout', str(CONFIG['TESSERACT_TIMEOUT']),
+                        '--image-dpi', str(avg_dpi),
+                        str(pdf_path),
+                        str(issue_dir / "temp_ocr_output.pdf")
+                    ]
                     
-                    # Extract text
-                    text_file = issue_dir / f"{base_name}_page_{page_num+1}.txt"
-                    with fitz.open(ocr_pdf) as ocr_doc:
-                        text = ocr_doc[0].get_text()
-                        text_file.write_text(text, encoding='utf-8')
+                    subprocess.run(cmd, check=True, timeout=CONFIG['TESSERACT_TIMEOUT'])
                     
-                    # Cleanup
-                    preprocessed_path.unlink()
-                    ocr_pdf.unlink()
-                    
-                    logging.info(f"Processed page {page_num+1}/{total_pages} of {pdf_path.name} (DPI: {avg_dpi})")
+                    # Extract new OCR text
+                    with fitz.open(issue_dir / "temp_ocr_output.pdf") as ocr_doc:
+                        new_text = ocr_doc.load_page(page_num).get_text()
+                        new_text_path = issue_dir / f"{base_name}_page_{page_num+1}.txt"
+                        new_text_path.write_text(new_text, encoding='utf-8')
+
+                    # Cleanup temporary files
+                    if preprocessed_path and not CONFIG['SAVE_PREPROCESSED_IMAGES']:
+                        preprocessed_path.unlink(missing_ok=True)
+                        
+                    logging.info(f"Processed page {page_num+1}/{total_pages}")
 
                 except Exception as page_error:
-                    logging.error(f"Error processing page {page_num+1} of {pdf_path.name}: {page_error}")
+                    logging.error(f"Error processing page {page_num+1}: {str(page_error)[:200]}")
                     continue
 
+            # Create comparison document after processing all pages
+            if CONFIG['COMPARISON_DOC']:
+                comparison_path = create_comparison_doc(issue_dir, base_name)
+                logging.info(f"Created comparison document: {comparison_path}")
+
+            # Final cleanup
+            (issue_dir / "temp_ocr_output.pdf").unlink(missing_ok=True)
+
     except Exception as doc_error:
-        logging.error(f"Error processing document {pdf_path.name}: {doc_error}")
+        logging.error(f"Error processing document: {str(doc_error)[:200]}")
 
 def process_pdfs(input_dir, output_dir):
     input_path = Path(input_dir)
     for pdf_file in input_path.glob('*.pdf'):
         process_pdf(pdf_file, output_dir)
 
-# Usage
 if __name__ == "__main__":
+    logging.info("Starting OCR processing with comparison feature")
     process_pdfs('input_pdfs', 'output_text')
+
 
 ```
 
