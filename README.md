@@ -79,6 +79,106 @@ if __name__ == "__main__":
 
 ```
 
+### Try 2 - with OpenCV cleaning and preprocessing
+
+```
+import os
+import subprocess
+import logging
+from pathlib import Path
+import cv2
+import numpy as np
+import fitz  # PyMuPDF
+from PIL import Image
+import io
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def preprocess_image(image):
+    # Convert to grayscale
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Noise reduction
+    denoised = cv2.fastNlMeansDenoising(gray, h=10)
+    
+    # Adaptive thresholding
+    thresh = cv2.adaptiveThreshold(denoised, 255, 
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+        cv2.THRESH_BINARY, 21, 10)
+    
+    # Morphological operations to clean text
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
+    cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+    
+    return cleaned
+
+def process_pdf(pdf_path, output_dir, languages='swe+eng'):
+    try:
+        base_name = Path(pdf_path).stem
+        issue_dir = Path(output_dir) / base_name
+        issue_dir.mkdir(parents=True, exist_ok=True)
+
+        with fitz.open(pdf_path) as doc:
+            total_pages = len(doc)
+            
+            for page_num in range(total_pages):
+                try:
+                    # Extract page as image
+                    page = doc.load_page(page_num)
+                    pix = page.get_pixmap()
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    img_np = np.array(img)
+                    
+                    # Preprocess image
+                    preprocessed = preprocess_image(img_np)
+                    
+                    # Save preprocessed image
+                    preprocessed_path = issue_dir / f"{base_name}_preprocessed_page_{page_num+1}.png"
+                    cv2.imwrite(str(preprocessed_path), preprocessed)
+                    
+                    # OCR with ocrmypdf
+                    ocr_pdf = issue_dir / f"{base_name}_ocr_page_{page_num+1}.pdf"
+                    subprocess.run([
+                        'ocrmypdf',
+                        '-l', languages,
+                        '--force-ocr',
+                        '--optimize', '3',
+                        str(preprocessed_path),
+                        str(ocr_pdf)
+                    ], check=True)
+                    
+                    # Extract text
+                    text_file = issue_dir / f"{base_name}_page_{page_num+1}.txt"
+                    with fitz.open(ocr_pdf) as ocr_doc:
+                        text = ocr_doc[0].get_text()
+                        text_file.write_text(text, encoding='utf-8')
+                    
+                    # Cleanup
+                    preprocessed_path.unlink()
+                    ocr_pdf.unlink()
+                    
+                    logging.info(f"Processed page {page_num+1}/{total_pages} of {pdf_path.name}")
+
+                except Exception as page_error:
+                    logging.error(f"Error processing page {page_num+1} of {pdf_path.name}: {page_error}")
+                    continue
+
+    except Exception as doc_error:
+        logging.error(f"Error processing document {pdf_path.name}: {doc_error}")
+
+def process_pdfs(input_dir, output_dir):
+    input_path = Path(input_dir)
+    for pdf_file in input_path.glob('*.pdf'):
+        process_pdf(pdf_file, output_dir)
+
+# Usage
+if __name__ == "__main__":
+    process_pdfs('input_pdfs', 'output_text')
+```
 
 
 
