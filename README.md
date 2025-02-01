@@ -6,10 +6,11 @@ source ocr_env/bin/activate
 
 uv pip install pymupdf ocrmypdf
 
-pdfdetach -saveall 1920-tal.pdf input_pdfs
+pdfdetach -saveall 1920-tal.pdf   
 
 
 
+### Try 1 - no preprocessing
 ```
 import os
 import subprocess
