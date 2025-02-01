@@ -1,5 +1,15 @@
 # QTC OCR
 
+uv venv ocr_env
+
+source ocr_env/bin/activate
+
+uv pip install pymupdf ocrmypdf
+
+pdfdetach -saveall 1920-tal.pdf input_pdfs
+
+
+
 ```
 import os
 import subprocess
@@ -8,10 +18,7 @@ from pathlib import Path
 import fitz  # PyMuPDF
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def process_pdf(pdf_path, output_dir, languages='swe+eng'):
     try:
@@ -66,7 +73,9 @@ def process_pdfs(input_dir, output_dir):
         process_pdf(pdf_file, output_dir)
 
 # Usage
-process_pdfs('input_pdfs', 'output_text')
+if __name__ == "__main__":
+    process_pdfs('input_pdfs', 'output_text')
+
 ```
 
 
