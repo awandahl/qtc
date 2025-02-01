@@ -1,5 +1,7 @@
 # QTC OCR
 
+https://community.element14.com/members-area/personalblogs/b/blog/posts/cleaning-old-scanned-book-pages-with-linux-bash-commands
+
 ### Install poppler (pdftotext etc)
 ```
 sudo apt-get install poppler-utils
