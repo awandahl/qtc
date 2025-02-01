@@ -118,7 +118,7 @@ def preprocess_image(image):
     
     return cleaned
 
-def process_pdf(pdf_path, output_dir, languages='swe+eng'):
+def process_pdf(pdf_path, output_dir, languages='swe'):
     try:
         base_name = Path(pdf_path).stem
         issue_dir = Path(output_dir) / base_name
