@@ -4,9 +4,8 @@ uv venv ocr_env
 
 source ocr_env/bin/activate
 
-uv pip install pymupdf ocrmypdf
+uv pip install pymupdf ocrmypdf opencv-python-headless pillow numpy
 
-uv pip install opencv-python
 
 pdfdetach -saveall 1920-tal.pdf   
 
@@ -92,7 +91,6 @@ import cv2
 import numpy as np
 import fitz  # PyMuPDF
 from PIL import Image
-import io
 
 # Configure logging
 logging.basicConfig(
@@ -102,7 +100,7 @@ logging.basicConfig(
 
 def preprocess_image(image):
     # Convert to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     
     # Noise reduction
     denoised = cv2.fastNlMeansDenoising(gray, h=10)
@@ -118,7 +116,7 @@ def preprocess_image(image):
     
     return cleaned
 
-def process_pdf(pdf_path, output_dir, languages='swe'):
+def process_pdf(pdf_path, output_dir, languages='swe+eng'):
     try:
         base_name = Path(pdf_path).stem
         issue_dir = Path(output_dir) / base_name
@@ -129,26 +127,36 @@ def process_pdf(pdf_path, output_dir, languages='swe'):
             
             for page_num in range(total_pages):
                 try:
-                    # Extract page as image
+                    # Extract page with original DPI metadata
                     page = doc.load_page(page_num)
                     pix = page.get_pixmap()
                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                    img_np = np.array(img)
                     
+                    # Calculate DPI from PDF dimensions (1 Point = 1/72 inch)
+                    pdf_width_pt = page.rect.width
+                    pdf_height_pt = page.rect.height
+                    dpi_x = pix.width / (pdf_width_pt/72)
+                    dpi_y = pix.height / (pdf_height_pt/72)
+                    avg_dpi = int((dpi_x + dpi_y) / 2)
+
                     # Preprocess image
-                    preprocessed = preprocess_image(img_np)
+                    preprocessed = preprocess_image(np.array(img))
                     
-                    # Save preprocessed image
+                    # Save preprocessed image with DPI metadata using Pillow
+                    preprocessed_pil = Image.fromarray(preprocessed)
                     preprocessed_path = issue_dir / f"{base_name}_preprocessed_page_{page_num+1}.png"
-                    cv2.imwrite(str(preprocessed_path), preprocessed)
-                    
-                    # OCR with ocrmypdf
+                    preprocessed_pil.save(str(preprocessed_path), dpi=(avg_dpi, avg_dpi))
+
+                    # OCR with explicit DPI parameter
                     ocr_pdf = issue_dir / f"{base_name}_ocr_page_{page_num+1}.pdf"
                     subprocess.run([
                         'ocrmypdf',
                         '-l', languages,
+                        '--image-dpi', str(avg_dpi),  # Explicit DPI setting
                         '--force-ocr',
                         '--optimize', '3',
+                        '--oversample', '300',  # Force minimum 300 DPI processing
+                        '--skip-big', '50',  # Skip images larger than 50 megapixels
                         str(preprocessed_path),
                         str(ocr_pdf)
                     ], check=True)
@@ -163,7 +171,7 @@ def process_pdf(pdf_path, output_dir, languages='swe'):
                     preprocessed_path.unlink()
                     ocr_pdf.unlink()
                     
-                    logging.info(f"Processed page {page_num+1}/{total_pages} of {pdf_path.name}")
+                    logging.info(f"Processed page {page_num+1}/{total_pages} of {pdf_path.name} (DPI: {avg_dpi})")
 
                 except Exception as page_error:
                     logging.error(f"Error processing page {page_num+1} of {pdf_path.name}: {page_error}")
@@ -180,6 +188,7 @@ def process_pdfs(input_dir, output_dir):
 # Usage
 if __name__ == "__main__":
     process_pdfs('input_pdfs', 'output_text')
+
 ```
 
 
