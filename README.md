@@ -89,9 +89,9 @@ import logging
 from pathlib import Path
 import fitz  # PyMuPDF
 from odf.opendocument import OpenDocumentText
-from odf.style import Style, TextProperties, ParagraphProperties, TabStops, TabStop
+from odf.style import import Style, ParagraphProperties
 from odf.table import Table, TableColumn, TableRow, TableCell
-from odf.text import H, P, PageBreak
+from odf.text P
 import cv2
 import numpy as np
 from PIL import Image
@@ -150,14 +150,18 @@ def create_comparison_doc(issue_dir, base_name):
     """Create ODT document with original vs new OCR text"""
     doc = OpenDocumentText()
     
-    # Create styles
-    h1style = Style(name="Heading 1", family="paragraph")
-    h1style.addElement(TextProperties(attributes={'fontsize':"14pt",'fontweight':"bold"}))
+    # Create page break style
+    page_break_style = Style(name="PageBreak", family="paragraph")
+    page_break_style.addElement(ParagraphProperties(breakbefore="page"))
+    doc.automaticstyles.addElement(page_break_style)
+    
+    # Create header style
+    h1style = Style(name="Heading1", family="paragraph")
+    h1style.addElement(TextProperties(fontsize="14pt", fontweight="bold"))
     doc.styles.addElement(h1style)
-
+    
     # Add header
-    header = H(outlinelevel=1, stylename=h1style)
-    header.addText(f"Comparison for issue: {base_name}")
+    header = P(stylename=h1style, text=f"Comparison for issue: {base_name}")
     doc.text.addElement(header)
     
     # Create table style
@@ -177,7 +181,7 @@ def create_comparison_doc(issue_dir, base_name):
     for i, (orig_file, new_file) in enumerate(zip(original_files, page_files)):
         if i > 0:
             # Add page break before each new page (except the first)
-            doc.text.addElement(PageBreak())
+            doc.text.addElement(P(stylename=page_break_style))
         
         try:
             with open(orig_file, 'r', encoding='utf-8') as f:
