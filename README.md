@@ -21,12 +21,14 @@ import re
 import os
 import logging
 from pathlib import Path
-import hunspell  # Use Swedish dictionary
+import hunspell
 import spacy
 
-# Load Swedish NLP model (requires prior download)
-# python -m spacy download sv_core_news_sm
-nlp = spacy.load("sv_core_news_sm")
+# Load Swedish NLP model
+try:
+    nlp = spacy.load("sv_core_news_sm")
+except OSError:
+    raise RuntimeError("Swedish model required. Run: python -m spacy download sv_core_news_sm")
 
 # Configuration
 CONFIG = {
@@ -34,29 +36,37 @@ CONFIG = {
     'min_word_length': 4,
     'min_word_freq': 3,
     'custom_dict': 'qtc_custom.dic',
-    'base_dict': '/usr/share/hunspell/sv_SE'  # Path to Swedish dictionary
+    'base_dict': '/usr/share/hunspell/sv_SE',
+    'ocr_prefix': 'QTC_',  # Match your OCR file pattern
+    'original_prefix': 'original_'
 }
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
 
 def collect_text_files():
-    texts = []
-    for root, _, files in Path(CONFIG['input_dir']).glob('**/*.txt'):
-        for file in files:
-            if file.startswith('ocr_'):
-                with open(Path(root)/file, 'r', encoding='utf-8') as f:
-                    texts.append(f.read())
-    return '\n'.join(texts)
+    """Collect OCR-processed text files from directory structure"""
+    ocr_files = []
+    for txt_path in Path(CONFIG['input_dir']).rglob('*.txt'):
+        if (txt_path.name.startswith(CONFIG['ocr_prefix']) and 
+            not txt_path.name.startswith(CONFIG['original_prefix']) and
+            'comparison' not in txt_path.name):
+            ocr_files.append(txt_path)
+    return ocr_files
 
-def generate_frequency_list(text):
-    # Basic cleaning and tokenization
-    words = re.findall(r'\b[\w+]+\b', text.lower())
-    return Counter(words)
+def generate_frequency_list(files):
+    """Generate word frequency list from OCR texts"""
+    word_counter = Counter()
+    for file in files:
+        with open(file, 'r', encoding='utf-8') as f:
+            text = f.read().lower()
+            words = re.findall(r'\b[\w+]+\b', text)
+            word_counter.update(words)
+    return word_counter
 
 def build_custom_dictionary(word_freq):
+    """Build custom dictionary using frequency analysis"""
     hobj = hunspell.HunSpell(CONFIG['base_dict'] + '.dic', CONFIG['base_dict'] + '.aff')
     
-    # Separate known words and potential errors
     known_words = set()
     potential_errors = {}
     
@@ -68,71 +78,70 @@ def build_custom_dictionary(word_freq):
     
     # Create custom dictionary
     with open(CONFIG['custom_dict'], 'w', encoding='utf-8') as f:
-        # Add known technical terms
-        f.write("# Amateur radio terms\n")
-        f.write("QTC\nQRG\nQTH\n")
+        f.write("# QTC Amateur Radio Dictionary\n")
+        f.write("QTC\nQRG\nQTH\n")  # Add known radio terms
+        
         # Add high-frequency potential terms
-        for word in sorted(potential_errors, key=potential_errors.get, reverse=True):
+        for word in sorted(potential_errors, key=lambda x: potential_errors[x], reverse=True):
             if potential_errors[word] >= CONFIG['min_word_freq']:
                 f.write(f"{word}\n")
     
-    return known_words, potential_errors
+    return known_words
 
-def correct_ocr_text(text, known_words):
-    doc = nlp(text)
-    corrections = {}
+def correct_ocr_files(files, known_words):
+    """Perform spellcheck and correction on OCR files"""
+    hobj = hunspell.HunSpell(CONFIG['base_dict'] + '.dic', CONFIG['base_dict'] + '.aff')
     
-    for token in doc:
-        word = token.text.lower()
-        if (len(word) >= CONFIG['min_word_length'] and 
-            word not in known_words and 
-            not token.is_punct and 
-            not token.like_num):
+    for file in files:
+        try:
+            with open(file, 'r', encoding='utf-8') as f:
+                original_text = f.read()
             
-            # Get most probable correction using frequency and similarity
-            suggestions = hobj.suggest(word)
-            if suggestions:
-                corrections[token.text] = suggestions[0]
-    
-    return corrections
+            doc = nlp(original_text)
+            corrections = {}
+            
+            for token in doc:
+                if (len(token.text) >= CONFIG['min_word_length'] and
+                    token.text.lower() not in known_words and
+                    not token.is_punct and
+                    not token.like_num):
+                    
+                    suggestions = hobj.suggest(token.text)
+                    if suggestions:
+                        corrections[token.text] = suggestions[0]
+            
+            # Apply corrections
+            corrected_text = original_text
+            for wrong, right in corrections.items():
+                corrected_text = re.sub(r'\b' + re.escape(wrong) + r'\b', right, corrected_text)
+            
+            # Save corrected file
+            corrected_path = file.parent / f"corrected_{file.name}"
+            with open(corrected_path, 'w', encoding='utf-8') as f:
+                f.write(corrected_text)
+            
+            logging.info(f"Processed {file.name} with {len(corrections)} corrections")
+            
+        except Exception as e:
+            logging.error(f"Error processing {file.name}: {str(e)[:200]}")
 
 def process_files():
-    # Step 1: Collect all OCR texts
-    logging.info("Collecting text files...")
-    combined_text = collect_text_files()
+    """Main processing workflow"""
+    logging.info("1/4 Collecting text files...")
+    ocr_files = collect_text_files()
     
-    # Step 2: Generate frequency list
-    logging.info("Generating frequency list...")
-    word_freq = generate_frequency_list(combined_text)
+    logging.info("2/4 Generating frequency list...")
+    word_freq = generate_frequency_list(ocr_files)
     
-    # Step 3: Build custom dictionary
-    logging.info("Building custom dictionary...")
-    known_words, potential_errors = build_custom_dictionary(word_freq)
+    logging.info("3/4 Building custom dictionary...")
+    known_words = build_custom_dictionary(word_freq)
     
-    # Step 4: Process files for corrections
-    logging.info("Starting correction process...")
-    for root, _, files in Path(CONFIG['input_dir']).glob('**/*.txt'):
-        for file in files:
-            if file.startswith('ocr_'):
-                input_file = Path(root)/file
-                output_file = Path(root)/f"corrected_{file}"
-                
-                with open(input_file, 'r', encoding='utf-8') as f:
-                    text = f.read()
-                
-                corrections = correct_ocr_text(text, known_words)
-                
-                # Apply corrections
-                for wrong, right in corrections.items():
-                    text = re.sub(r'\b' + re.escape(wrong) + r'\b', right, text)
-                
-                with open(output_file, 'w', encoding='utf-8') as f:
-                    f.write(text)
-                
-                logging.info(f"Processed {file} with {len(corrections)} corrections")
+    logging.info("4/4 Performing corrections...")
+    correct_ocr_files(ocr_files, known_words)
 
 if __name__ == "__main__":
     process_files()
+
 ```
 
 
