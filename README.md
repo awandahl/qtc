@@ -3,12 +3,12 @@
 
 https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
 
-sudo apt install libhunspell-dev
+sudo apt install libhunspell-dev   
 sudo apt-get install hunspell-sv
 
-
-uv pip install odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy
-uv pip install hunspell spacy python-Levenshtein
+uv pip install pip
+uv pip install odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy   
+uv pip install hunspell spacy python-Levenshtein   
 python -m spacy download sv_core_news_sm   
 
 
