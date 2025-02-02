@@ -7,6 +7,7 @@ sudo apt install libhunspell-dev
 sudo apt-get install hunspell-sv
 
 uv pip install pip
+uv pip install regex
 uv pip install odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy   
 uv pip install hunspell spacy python-Levenshtein   
 python -m spacy download sv_core_news_sm   
