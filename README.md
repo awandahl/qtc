@@ -90,9 +90,9 @@ import logging
 from pathlib import Path
 import fitz  # PyMuPDF
 from odf.opendocument import OpenDocumentText
-from odf.style import import Style, ParagraphProperties
+from odf.style import Style, TextProperties, ParagraphProperties, TableColumnProperties
 from odf.table import Table, TableColumn, TableRow, TableCell
-from odf.text P
+from odf.text import P
 import cv2
 import numpy as np
 from PIL import Image
@@ -181,7 +181,6 @@ def create_comparison_doc(issue_dir, base_name):
     
     for i, (orig_file, new_file) in enumerate(zip(original_files, page_files)):
         if i > 0:
-            # Add page break before each new page (except the first)
             doc.text.addElement(P(stylename=page_break_style))
         
         try:
@@ -255,12 +254,6 @@ def process_pdf(pdf_path, output_dir):
                     # Preprocess image
                     preprocessed = preprocess_image(np.array(img))
                     
-                    # Save preprocessed image if enabled
-                    preprocessed_path = None
-                    if CONFIG['SAVE_PREPROCESSED_IMAGES']:
-                        preprocessed_path = issue_dir / f"{base_name}_preprocessed_page_{page_num+1}.png"
-                        Image.fromarray(preprocessed).save(str(preprocessed_path), dpi=(avg_dpi, avg_dpi))
-
                     # Build OCR command
                     cmd = [
                         'ocrmypdf',
@@ -281,17 +274,13 @@ def process_pdf(pdf_path, output_dir):
                         new_text_path = issue_dir / f"{base_name}_page_{page_num+1}.txt"
                         new_text_path.write_text(new_text, encoding='utf-8')
 
-                    # Cleanup temporary files
-                    if preprocessed_path and not CONFIG['SAVE_PREPROCESSED_IMAGES']:
-                        preprocessed_path.unlink(missing_ok=True)
-                        
                     logging.info(f"Processed page {page_num+1}/{total_pages}")
 
                 except Exception as page_error:
                     logging.error(f"Error processing page {page_num+1}: {str(page_error)[:200]}")
                     continue
 
-            # Create comparison document after processing all pages
+            # Create comparison document
             if CONFIG['COMPARISON_DOC']:
                 comparison_path = create_comparison_doc(issue_dir, base_name)
                 logging.info(f"Created comparison document: {comparison_path}")
@@ -310,7 +299,6 @@ def process_pdfs(input_dir, output_dir):
 if __name__ == "__main__":
     logging.info("Starting OCR processing with comparison feature")
     process_pdfs('input_pdfs', 'output_text')
-
 
 ```
 
