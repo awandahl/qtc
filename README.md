@@ -367,7 +367,7 @@ if __name__ == "__main__":
     print(f"Total execution time: {format_time(end_time - start_time)}")
 ```
 
-### Curation and spell check code
+## Curation and spell check code
 
 
 ```
