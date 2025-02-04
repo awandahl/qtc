@@ -31,7 +31,7 @@ sudo apt install ocrmypdf
 sudo apt-get install tesseract tesseract-ocr-swe
 ```
 
-#### Install JBIG2 encoder (make smaller PDFs)
+### Install JBIG2 encoder (make smaller PDFs)
 https://ocrmypdf.readthedocs.io/en/latest/jbig2.html
 
 ```
