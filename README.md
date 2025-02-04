@@ -14,7 +14,14 @@ uv pip install pip
 uv pip install regex odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy hunspell spacy python-Levenshtein
 
 PDFs should be put in the directory "input_pdfs"   
-Output text will be located in the directory "output_text", each issue in its own directory.  
+Output text will be located in the directory "output_text", each issue in its own directory. 
+
+PDF-portfolios by decade should ideally be unpacked in a separate directory by:
+``
+pdfdetach -saveall 1920-tal.pdf
+```
+and the files can be moved to "input_pdfs" for OCR. Different decades have different kinds of challenges why it's adviseable to treat them separately.
+
 
 ### OCR code
 
