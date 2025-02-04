@@ -3,6 +3,13 @@
 
 https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
 
+### Install UV
+https://github.com/astral-sh/uv
+```
+# On macOS and Linux.
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 ### Create a virtual environment for python, in this case using uv
 ```
 uv venv ocr_env   
