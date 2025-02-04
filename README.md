@@ -16,8 +16,8 @@ python -m spacy download sv_core_news_sm
 uv pip install pip
 uv pip install regex odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy hunspell spacy python-Levenshtein
 
-PDFs should be put in the directory "input_pdfs"   
-Output text will be located in the directory "output_text", each issue in its own directory. 
+- PDFs should be put in the directory "input_pdfs"   
+- Output text will be created in the directory "output_text", each issue in its own directory. 
 
 PDF-portfolios by decade should ideally be unpacked in a separate directory by:
 ```
