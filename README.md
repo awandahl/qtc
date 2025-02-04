@@ -3,7 +3,7 @@
 
 https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
 
-Create a virtual environment for python, in this case using uv
+### Create a virtual environment for python, in this case using uv
 ```
 uv venv ocr_env   
 source ocr_env/bin/activate
@@ -24,11 +24,11 @@ apt install ocrmypdf
 sudo apt-get install tesseract tesseract-ocr-swe
 ```
 
-#### Build JBIG2 encoder (make smaller PDFs)
+#### Install JBIG2 encoder (make smaller PDFs)
 https://ocrmypdf.readthedocs.io/en/latest/jbig2.html
 
 ```
-[sudo] apt install autotools-dev automake libtool libleptonica-dev
+sudo apt install autotools-dev automake libtool libleptonica-dev
 ```
 ```
 git clone https://github.com/agl/jbig2enc
@@ -43,7 +43,7 @@ sudo apt install libhunspell-dev
 sudo apt-get install hunspell-sv
 ```
 ### Install Spacy including Swedish language for NLP
-``
+```
 python -m spacy download sv_core_news_sm   
 ```
 ### Install various python packages
