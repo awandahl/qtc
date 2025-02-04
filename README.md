@@ -71,7 +71,7 @@ pdfdetach -saveall 1920-tal.pdf
 and the files can be moved to "input_pdfs" for OCR. Different decades have different kinds of challenges why it's adviseable to treat them separately.
 
 
-### OCR code
+## OCR code
 
 ```
 import os
@@ -370,7 +370,6 @@ if __name__ == "__main__":
 ### Spell check and curation
 
 
-
 ```
 from collections import Counter
 import re
@@ -394,7 +393,9 @@ CONFIG = {
     'custom_dict': 'qtc_custom.dic',
     'base_dict': '/usr/share/hunspell/sv_SE',
     'ocr_prefix': 'QTC_',  # Match your OCR file pattern
-    'original_prefix': 'original_'
+    'original_prefix': 'original_',
+    'manual_corrections': 'manual_corrections.csv',
+    'force_corrections': True  # Apply manual corrections first
 }
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -444,9 +445,30 @@ def build_custom_dictionary(word_freq):
     
     return known_words
 
+def load_manual_corrections():
+    """Load manual corrections from a CSV file with error handling"""
+    corrections = {}
+    try:
+        with open(CONFIG['manual_corrections'], 'r', encoding='utf-8') as f:
+            for line_number, line in enumerate(f, 1):
+                line = line.strip()
+                if not line or line.startswith('#'):  # Skip empty lines and comments
+                    continue
+                if ',' not in line:
+                    logging.warning(f"Skipping invalid line {line_number}: {line}")
+                    continue
+                
+                wrong, correct = line.split(',', 1)  # Split on first comma only
+                corrections[wrong.lower().strip()] = correct.strip()
+                
+    except FileNotFoundError:
+        logging.warning("Manual corrections file not found")
+    return corrections
+
 def correct_ocr_files(files, known_words):
     """Perform spellcheck and correction on OCR files"""
     hobj = hunspell.HunSpell(CONFIG['base_dict'] + '.dic', CONFIG['base_dict'] + '.aff')
+    manual_corrections = load_manual_corrections()
     
     for file in files:
         try:
@@ -457,16 +479,24 @@ def correct_ocr_files(files, known_words):
             corrections = {}
             
             for token in doc:
+                lower_word = token.text.lower()
+                
+                # Apply manual corrections first
+                if lower_word in manual_corrections:
+                    corrections[token.text] = manual_corrections[lower_word]
+                    continue
+                
+                # Existing logic for other corrections
                 if (len(token.text) >= CONFIG['min_word_length'] and
-                    token.text.lower() not in known_words and
+                    lower_word not in known_words and
                     not token.is_punct and
                     not token.like_num):
                     
                     suggestions = hobj.suggest(token.text)
                     if suggestions:
                         corrections[token.text] = suggestions[0]
-            
-            # Apply corrections
+
+            # Apply corrections to the text
             corrected_text = original_text
             for wrong, right in corrections.items():
                 corrected_text = re.sub(r'\b' + re.escape(wrong) + r'\b', right, corrected_text)
@@ -497,6 +527,7 @@ def process_files():
 
 if __name__ == "__main__":
     process_files()
+
 
 ```
 
