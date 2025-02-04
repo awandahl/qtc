@@ -3,8 +3,11 @@
 
 https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
 
+Create a virtual environment for python, in this case using uv
+```
 uv venv ocr_env   
 source ocr_env/bin/activate
+```
 
 sudo apt install libhunspell-dev   
 sudo apt-get install hunspell-sv   
