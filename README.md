@@ -10,7 +10,7 @@ https://github.com/astral-sh/uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Create an virtual environment for python, in this case using uv
+### Create uv virtual environment
 ```
 uv venv ocr_env   
 source ocr_env/bin/activate
