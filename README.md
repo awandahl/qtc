@@ -310,7 +310,8 @@ if __name__ == "__main__":
     process_pdfs('input_pdfs', 'output_text')
     end_time = time.time()
     print(f"Total execution time: {format_time(end_time - start_time)}")
-``
+```
+
 
 
 ```
