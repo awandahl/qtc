@@ -1,8 +1,6 @@
 # QTC OCR
 
 
-https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
-
 ### Install uv
 https://github.com/astral-sh/uv
 ```
