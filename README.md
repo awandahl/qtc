@@ -153,7 +153,7 @@ uv venv ocr_env
 
 source ocr_env/bin/activate
 
-uv pip install pymupdf ocrmypdf opencv-python-headless pillow numpy odfpy
+uv pip install pymupdf ocrmypdf opencv-python-headless pillow numpy odfpy    
 uv pip install odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy
 
 
