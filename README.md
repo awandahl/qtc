@@ -21,14 +21,14 @@ source ocr_env/bin/activate
 sudo apt-get install poppler-utils
 ```
 
-### Install ocrmypdf (including Tesseract)  
+### Install Tesseract and Swedish language pack
 ```
-sudo apt install ocrmypdf
+sudo apt-get install tesseract-ocr tesseract-ocr-swe
 ```
 
-### Install Swedish language pack for Tesseract
+### Install ocrmypdf
 ```
-sudo apt-get install tesseract tesseract-ocr-swe
+sudo apt install ocrmypdf
 ```
 
 ### Install JBIG2 encoder (make smaller PDFs)
@@ -44,17 +44,19 @@ cd jbig2enc
 ./configure && make
 [sudo] make install
 ```
+
 ### Install Hunspell for spell checking, including Swedish language
 ```
 sudo apt install libhunspell-dev   
 sudo apt-get install hunspell-sv
 ```
+
 ### Install Spacy for NLP, including Swedish language
 ```
 python -m spacy download sv_core_news_sm   
 ```
-### Install various python packages
 
+### Install various python packages
 ```
 uv pip install pip
 uv pip install regex odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy hunspell spacy python-Levenshtein
@@ -64,7 +66,6 @@ uv pip install regex odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy 
 - Output text will be created in the directory "output_text", each issue in its own directory. 
 
 PDF-portfolios by decade should ideally be unpacked in a separate directory by:
-
 ```
 pdfdetach -saveall 1920-tal.pdf
 ```
@@ -72,7 +73,6 @@ and the files can be moved to "input_pdfs" for OCR. Different decades have diffe
 
 
 ## OCR code
-
 ```
 import os
 import subprocess
@@ -368,8 +368,6 @@ if __name__ == "__main__":
 ```
 
 ## Curation and spell check code
-
-
 ```
 from collections import Counter
 import re
