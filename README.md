@@ -3,7 +3,7 @@
 
 https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
 
-### Install UV
+### Install uv
 https://github.com/astral-sh/uv
 ```
 # On macOS and Linux.
@@ -44,12 +44,12 @@ cd jbig2enc
 ./configure && make
 [sudo] make install
 ```
-### Install Hunspell for spell checking including Swedish language
+### Install Hunspell for spell checking, including Swedish language
 ```
 sudo apt install libhunspell-dev   
 sudo apt-get install hunspell-sv
 ```
-### Install Spacy including Swedish language for NLP
+### Install Spacy, including Swedish language, for NLP
 ```
 python -m spacy download sv_core_news_sm   
 ```
