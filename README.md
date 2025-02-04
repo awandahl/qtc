@@ -3,17 +3,314 @@
 
 https://www.perplexity.ai/search/how-can-i-run-pdftotext-on-a-p-ui5jRLHsSZGrnELgkg23xg#45
 
-sudo apt install libhunspell-dev   
-sudo apt-get install hunspell-sv
+uv venv ocr_env   
+source ocr_env/bin/activate
 
-uv pip install pip
-uv pip install regex
-uv pip install odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy   
-uv pip install hunspell spacy python-Levenshtein   
+sudo apt install libhunspell-dev   
+sudo apt-get install hunspell-sv   
 python -m spacy download sv_core_news_sm   
 
+uv pip install pip
+uv pip install regex odfpy pymupdf ocrmypdf opencv-python-headless pillow numpy hunspell spacy python-Levenshtein
+
+PDFs should be put in the directory "input_pdfs"   
+Output text will be located in the directory "output_text", each issue in its own directory.  
+
+### OCR code
+
+```
+import os
+import subprocess
+import logging
+from pathlib import Path
+import fitz  # PyMuPDF
+from odf.opendocument import OpenDocumentText
+from odf.style import Style, TextProperties, ParagraphProperties, TableColumnProperties
+from odf.table import Table, TableColumn, TableRow, TableCell
+from odf.text import P
+import cv2
+import numpy as np
+from PIL import Image
+import regex as re
+import time
+from datetime import timedelta
+import json
+
+# Configuration
+CONFIG = {
+    'ENABLE_PREPROCESSING': False,
+    'ENABLE_GRAYSCALE': False,
+    'ENABLE_DENOISE': True,
+    'ENABLE_THRESHOLDING': False,
+    'ENABLE_MORPHOLOGY': False,
+    'THRESH_BLOCK_SIZE': 21,
+    'THRESH_C': 10,
+    'LANGUAGES': 'swe',
+    'OPTIMIZE_LEVEL': 3,
+    'FORCE_OCR': True,
+    'SAVE_PREPROCESSED_IMAGES': False,
+    'TRIAL_MODE': False,
+    'TESSERACT_TIMEOUT': 240,
+    'COMPARISON_DOC': True
+}
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+
+def format_time(seconds):
+    return str(timedelta(seconds=int(seconds)))
+
+def preprocess_image(image):
+    """Apply preprocessing steps based on configuration"""
+    if not CONFIG['ENABLE_PREPROCESSING']:
+        return image
+    
+    if CONFIG['ENABLE_GRAYSCALE']:
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    
+    if CONFIG['ENABLE_DENOISE']:
+        image = cv2.fastNlMeansDenoising(image, h=10)
+    
+    if CONFIG['ENABLE_THRESHOLDING']:
+        image = cv2.adaptiveThreshold(
+            image, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            CONFIG['THRESH_BLOCK_SIZE'],
+            CONFIG['THRESH_C']
+        )
+    
+    if CONFIG['ENABLE_MORPHOLOGY']:
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2,2))
+        image = cv2.morphologyEx(image, cv2.MORPH_CLOSE, kernel)
+    
+    return image
+
+def fix_hyphenated_words(text):
+    """Merge words split by line-ending hyphens in Swedish text"""
+    return re.sub(
+        r'(?<=\p{L})[-\u2013]\s*\r?\n\s*(?=\p{L})', 
+        '', 
+        text, 
+        flags=re.UNICODE
+    )
+
+def create_comparison_doc(issue_dir, base_name):
+    """Create ODT document with original vs new OCR text"""
+    doc = OpenDocumentText()
+    
+    # Create styles
+    page_break_style = Style(name="PageBreak", family="paragraph")
+    page_break_style.addElement(ParagraphProperties(breakbefore="page"))
+    doc.automaticstyles.addElement(page_break_style)
+    
+    h1style = Style(name="Heading1", family="paragraph")
+    h1style.addElement(TextProperties(fontsize="14pt", fontweight="bold"))
+    doc.styles.addElement(h1style)
+    
+    h2style = Style(name="Heading2", family="paragraph")
+    h2style.addElement(TextProperties(fontsize="12pt", fontweight="bold"))
+    doc.styles.addElement(h2style)
+    
+    # Create table style
+    table_style = Style(name="ComparisonTable", family="table")
+    col_style = Style(name="TableColumn", family="table-column")
+    col_props = TableColumnProperties(columnwidth="8cm")
+    col_style.addElement(col_props)
+    doc.automaticstyles.addElement(col_style)
+    
+    # Add header
+    header = P(stylename=h1style, text=f"Comparison for issue: {base_name}")
+    doc.text.addElement(header)
+    
+    # Add pages in order
+    page_files = sorted(issue_dir.glob(f"{base_name}_page_*.txt"))
+    original_files = sorted(issue_dir.glob(f"original_{base_name}_page_*.txt"))
+    
+    for i, (orig_file, new_file) in enumerate(zip(original_files, page_files)):
+        if i > 0:
+            doc.text.addElement(P(stylename=page_break_style))
+        
+        # Add page number
+        page_header = P(stylename=h2style, text=f"Page {i+1}")
+        doc.text.addElement(page_header)
+        
+        try:
+            with open(orig_file, 'r', encoding='utf-8') as f:
+                original_text = f.read()
+            with open(new_file, 'r', encoding='utf-8') as f:
+                new_text = f.read()
+            
+            table = Table(stylename=table_style)
+            table.addElement(TableColumn(numbercolumnsrepeated=2, stylename=col_style))
+            
+            row = TableRow()
+            # Original text cell
+            cell = TableCell()
+            p = P(text="Original Text:")
+            cell.addElement(p)
+            p = P(text=original_text)
+            cell.addElement(p)
+            row.addElement(cell)
+            
+            # New OCR cell
+            cell = TableCell()
+            p = P(text="New OCR Text:")
+            cell.addElement(p)
+            p = P(text=new_text)
+            cell.addElement(p)
+            row.addElement(cell)
+            
+            table.addElement(row)
+            doc.text.addElement(table)
+        
+        except Exception as e:
+            logging.error(f"Error creating comparison row: {str(e)[:200]}")
+    
+    output_path = issue_dir / f"{base_name}_comparison.odt"
+    doc.save(str(output_path))
+    return output_path
 
 
+def process_pdf(pdf_path, output_dir):
+    start_time = time.time()
+    base_name = Path(pdf_path).stem
+    stats = {
+        "file_name": base_name,
+        "total_pages": 0,
+        "processed_pages": 0,
+        "errors": 0,
+        "start_time": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(start_time)),
+    }
+    
+    try:
+        issue_dir = Path(output_dir) / base_name
+        issue_dir.mkdir(parents=True, exist_ok=True)
+
+        original_texts = []
+        
+        with fitz.open(pdf_path) as doc:
+            stats["total_pages"] = len(doc)
+            total_pages = len(doc)
+            if CONFIG['TRIAL_MODE']:
+                total_pages = min(1, total_pages)
+            
+            # First pass: Extract original text without modification
+            for page_num in range(total_pages):
+                try:
+                    page = doc.load_page(page_num)
+                    original_text = page.get_text()
+                    original_path = issue_dir / f"original_{base_name}_page_{page_num+1}.txt"
+                    original_path.write_text(original_text, encoding='utf-8')
+                    original_texts.append(original_text)
+                except Exception as e:
+                    logging.error(f"Error extracting original text page {page_num+1}: {str(e)[:200]}")
+                    original_texts.append("")
+                    stats["errors"] += 1
+
+            # Second pass: Process with OCR and apply de-hyphenation
+            for page_num in range(total_pages):
+                try:
+                    page = doc.load_page(page_num)
+                    pix = page.get_pixmap()
+                    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    
+                    # Preprocess image
+                    preprocessed = preprocess_image(np.array(img))
+
+                    # Set TMPDIR environment variable
+                    os.environ['TMPDIR'] = '/data/QTC/tmp'
+                    
+                    # Build OCR command
+                    cmd = [
+                        'ocrmypdf',
+                        '-l', CONFIG['LANGUAGES'],
+                        '--force-ocr',
+                        '--optimize', str(CONFIG['OPTIMIZE_LEVEL']),
+                        '--tesseract-timeout', str(CONFIG['TESSERACT_TIMEOUT']),
+                        str(pdf_path),
+                        str(issue_dir / "temp_ocr_output.pdf")
+                    ]
+                    
+                    subprocess.run(cmd, check=True, timeout=CONFIG['TESSERACT_TIMEOUT'])
+                    
+                    # Extract new OCR text and apply de-hyphenation
+                    with fitz.open(issue_dir / "temp_ocr_output.pdf") as ocr_doc:
+                        new_text = ocr_doc.load_page(page_num).get_text()
+                        new_text = fix_hyphenated_words(new_text)
+                        new_text_path = issue_dir / f"{base_name}_page_{page_num+1}.txt"
+                        new_text_path.write_text(new_text, encoding='utf-8')
+
+                    logging.info(f"Processed page {page_num+1}/{total_pages}")
+                    stats["processed_pages"] += 1
+
+                except Exception as page_error:
+                    logging.error(f"Error processing page {page_num+1}: {str(page_error)[:200]}")
+                    stats["errors"] += 1
+                    continue
+
+            # Create comparison document
+            if CONFIG['COMPARISON_DOC']:
+                comparison_path = create_comparison_doc(issue_dir, base_name)
+                logging.info(f"Created comparison document: {comparison_path}")
+
+            # Final cleanup
+            (issue_dir / "temp_ocr_output.pdf").unlink(missing_ok=True)
+
+    except Exception as doc_error:
+        logging.error(f"Error processing document: {str(doc_error)[:200]}")
+        stats["errors"] += 1
+    
+    end_time = time.time()
+    processing_time = end_time - start_time
+    stats["processing_time"] = format_time(processing_time)
+    stats["end_time"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(end_time))
+    
+    return stats
+
+def process_pdfs(input_dir, output_dir):
+    input_path = Path(input_dir)
+    all_stats = []
+    total_start_time = time.time()
+    
+    for pdf_file in input_path.glob('*.pdf'):
+        stats = process_pdf(pdf_file, output_dir)
+        all_stats.append(stats)
+        
+        # Print progress
+        print(f"Processed {stats['file_name']}: {stats['processed_pages']}/{stats['total_pages']} pages in {stats['processing_time']}")
+    
+    total_end_time = time.time()
+    total_processing_time = total_end_time - total_start_time
+    
+    # Calculate overall statistics
+    overall_stats = {
+        "total_files": len(all_stats),
+        "total_pages": sum(s["total_pages"] for s in all_stats),
+        "total_processed_pages": sum(s["processed_pages"] for s in all_stats),
+        "total_errors": sum(s["errors"] for s in all_stats),
+        "total_processing_time": format_time(total_processing_time),
+        "average_time_per_file": format_time(total_processing_time / len(all_stats)) if all_stats else "N/A",
+    }
+    
+    # Write statistics to a JSON file
+    stats_file = Path(output_dir) / "processing_statistics.json"
+    with open(stats_file, "w") as f:
+        json.dump({"overall_stats": overall_stats, "file_stats": all_stats}, f, indent=2)
+    
+    print(f"\nTotal processing time: {overall_stats['total_processing_time']}")
+    print(f"Statistics saved to {stats_file}")
+
+if __name__ == "__main__":
+    logging.info("Starting OCR processing with comparison feature")
+    start_time = time.time()
+    process_pdfs('input_pdfs', 'output_text')
+    end_time = time.time()
+    print(f"Total execution time: {format_time(end_time - start_time)}")
+``
 
 
 ```
