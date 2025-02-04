@@ -49,7 +49,7 @@ cd jbig2enc
 sudo apt install libhunspell-dev   
 sudo apt-get install hunspell-sv
 ```
-### Install Spacy, including Swedish language, for NLP
+### Install Spacy for NLP, including Swedish language
 ```
 python -m spacy download sv_core_news_sm   
 ```
