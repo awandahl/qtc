@@ -23,7 +23,7 @@ sudo apt-get install poppler-utils
 
 ### Install ocrmypdf (including Tesseract)  
 ```
-apt install ocrmypdf
+sudo apt install ocrmypdf
 ```
 
 ### Install Swedish language pack for Tesseract
