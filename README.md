@@ -1,78 +1,294 @@
-Documentation – Lumo / Cricket QTC Search Proxy
+<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" style="height:64px;margin-right:32px"/>
 
-Version: 1.0 · Date: 7 Sept 2025
-Table of Contents
+# hi there, i have this chunk of text which is coming from your competitor lumo and is a mix between raw markdown and rendered ditto. can you make raw markdown out of it? here is the chunk:   \# 📚 Documentation – Lumo / Cricket QTC Search Proxy
 
-    Overview
-    Architecture Diagram (textual)
-    Components & Their Roles
-    What Was Changed & Why
-        4.1 Nginx configuration
-        4.2 proxy.py (Flask/Gunicorn)
-        4.3 Systemd service for the proxy
-        4.4 Certificate handling (Certbot)
-    Request Flow – From Browser to MeiliSearch
-    How to Test the Setup
-    Maintenance & Future Extensions
-    References & Useful Commands
+*Version: 1.0 · Date: 7 Sept 2025*
 
-Overview
+---
 
-The goal was to expose a secure, read‑only search API for the QTC archive while protecting the MeiliSearch master API key.
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture Diagram (textual)](#architecture-diagram-textual)
+3. [Components \& Their Roles](#components--their-roles)
+4. [What Was Changed \& Why](#what-was-changed--why)
+    - 4.1 [NGINX configuration](#nginx-configuration)
+    - 4.2 [`proxy.py` (Flask/Gunicorn)](#proxypy-flaskgunicorn)
+    - 4.3 [Systemd service for the proxy](#systemd-service-for-the-proxy)
+    - 4.4 [Certificate handling (Certbot)](#certificate-handling-certbot)
+5. [Request Flow – From Browser to MeiliSearch](#request-flow--from-browser-to-meilisearch)
+6. [How to Test the Setup](#how-to-test-the-setup)
+7. [Maintenance \& Future Extensions](#maintenance--future-extensions)
+8. [References \& Useful Commands](#references--useful-commands)
+
+---
+
+## Overview
+
+The goal was to expose a **secure, read‑only search API** for the QTC archive while **protecting the MeiliSearch master API key**.
 We achieved this by:
 
-    Adding an NGINX reverse‑proxy location (/qtc-proxy/) that forwards POST requests to a small Flask application.
-    The Flask app receives the client’s JSON payload, injects the master key, forwards the request to the MeiliSearch instance, and returns the raw JSON response.
-    The original public endpoint (/qtc/) continues to serve the static UI, while the new proxy endpoint (/qtc-proxy/) handles all search traffic.
+* Adding an **NGINX reverse‑proxy location** (`/qtc-proxy/`) that forwards POST requests to a small **Flask** application.
+* The Flask app receives the client’s JSON payload, injects the master key, forwards the request to the **MeiliSearch** instance, and returns the raw JSON response.
+* The original public endpoint (`/qtc/`) continues to serve the static UI, while the new proxy endpoint (`/qtc-proxy/`) handles all search traffic.
 
-Architecture Diagram (textual)
+---
+
+## Architecture Diagram (textual)
+
+    +----------------------+          +----------------------+          +----------------------+
+    |  User’s Browser      |  HTTPS   |  NGINX (frontend)   |  HTTP    |  Flask / Gunicorn    |
+    |  (JS UI)             |--------->|  - Serves static UI  |--------->|  - proxy.py          |
+    |  https://cricket...  |          |  - /qtc-proxy/       |          |  - injects master key|
+    +----------------------+          +----------------------+          +----------+-----------+
+                                                                          |
+                                                                          | HTTP (localhost:7700)
+                                                                          v
+                                                                +----------------------+
+                                                                |  MeiliSearch         |
+                                                                |  http://127.0.0.1:7700|
+                                                                +----------------------+
+    *All traffic between NGINX and the Flask app stays on the same host (loopback).
+Certificates are terminated at NGINX, so the Flask process never sees TLS.*
+
+---
+
+## Components \& Their Roles
+
+| Component | Path / Service | Purpose |
+| :-- | :-- | :-- |
+| **NGINX** | `/etc/nginx/sites-available/cricket.lib.kth.se` (symlinked in `sites-enabled`) | Terminates TLS, serves static UI (`/qtc/`), proxies `/qtc-proxy/` to Flask, enforces method whitelist, adds security headers. |
+| **Flask app** | `/var/www/cricket.lib.kth.se/qtc-proxy/proxy.py` | Receives JSON, adds `Authorization: Bearer <MASTER_KEY>`, forwards to MeiliSearch, returns JSON. |
+| **Gunicorn** | Systemd unit `qtc-proxy.service` (executes `gunicorn -w 4 -b 127.0.0.1:8080 proxy:app`) | Production‑grade WSGI server for the Flask app. |
+| **MeiliSearch** | `http://127.0.0.1:7700` (installed separately) | Full‑text search engine storing the QTC documents. |
+| **Certbot** | `/etc/letsencrypt/...` | Automatically obtains/renews TLS certificates for `cricket.lib.kth.se`. |
+| **Systemd** | `/etc/systemd/system/qtc-proxy.service` | Manages the Gunicorn process (auto‑restart, logging). |
+
+
+---
+
+## What Was Changed \& Why
+
+### 4.1 NGINX configuration
+
+* **Removed duplicate `server_name` definitions** – only one `server_name cricket.lib.kth.se` now exists for each listen port (80 \& 443).
+* **Added `/qtc-proxy/` location**
+    * Limits allowed methods to `GET, HEAD, POST, OPTIONS`.
+    * Strips the extra path segment and rewrites to `/search` **or** (if you keep the longer route) forwards the full URI unchanged.
+    * Sets standard security headers (`Strict-Transport-Security`, `X-Frame-Options`, etc.).
+* **Ensured `proxy_pass` points to the local Flask service** (`http://127.0.0.1:8080`).
+
+Result: No more “conflicting server name” warnings; the proxy endpoint is reachable.
+
+### 4.2 `proxy.py` (Flask/Gunicorn)
+
+* Fixed syntax errors (imports, `__name__`, decorator commas).
+* Added **two routes**:
+    * `/search` – the short‑hand route used by the UI.
+    * `/indexes/<index>/search` – mirrors the native MeiliSearch API, allowing the UI (or any client) to call the canonical path (`/qtc-proxy/indexes/QTC_json/search`).
+* Centralised the forwarding logic in `forward_to_meilisearch(payload, index_name)` – injects the master key from the environment variable `MEILI_MASTER_KEY`.
+* Added robust error handling (returns generic `{"error":"search failed"}` with HTTP 502).
+* Included a simple health‑check endpoint (`/healthz`).
+
+Result: The Flask app now correctly receives the client payload, adds authentication, forwards it, and returns the exact MeiliSearch JSON response.
+
+### 4.3 Systemd service for the proxy
+
+[Unit] Description=Gunicorn instance to serve QTC search proxy After=network.target
+[Service] User=www-data Group=www-data WorkingDirectory=/var/www/cricket.lib.kth.se/qtc-proxy Environment="MEILI_URL=[http://127.0.0.1:7700](http://127.0.0.1:7700)" Environment="MEILI_MASTER_KEY=YOUR_MASTER_KEY_HERE" ExecStart=/usr/local/bin/gunicorn --workers 4 --bind 127.0.0.1:8080 proxy:app
+[Install] WantedBy=multi-user.target
+*Runs the Flask app under `www-data`, isolates the master key from the code base, and restarts automatically on failure.*
+
+### 4.4 Certificate handling (Certbot)
+
+* `certbot` obtained a wildcard‑compatible certificate for `cricket.lib.kth.se`.
+* NGINX is configured to use the certs (`ssl_certificate …; ssl_certificate_key …;`).
+* Renewal is automated (`certbot renew --quiet` runs daily via systemd timer).
+
+---
+
+## Request Flow – From Browser to MeiliSearch
+
+1. **User clicks “Search”** in the UI (served from `/qtc/`).
+2. JavaScript issues a **POST** to `https://cricket.lib.kth.se/qtc-proxy/search` (or the longer `/qtc-proxy/indexes/QTC_json/search`).
+3. **NGINX** receives the request:
+    * Verifies the method is allowed.
+    * Rewrites the URI (if using the short route) to `/search` **or** passes the full path unchanged.
+    * Forwards the request to `http://127.0.0.1:8080` (Gunicorn).
+4. **Gunicorn → Flask** (`proxy.py`) parses the JSON payload.
+5. Flask builds a new request to **MeiliSearch** at `http://127.0.0.1:7700/indexes/QTC_json/search` and **adds** the `Authorization: Bearer <MASTER_KEY>` header (read from the environment).
+6. MeiliSearch processes the query and returns a JSON response (hits, pagination info, etc.).
+7. Flask receives the response, **passes it straight back** to NGINX (no modification).
+8. NGINX streams the JSON back to the browser.
+9. The UI renders the results.
+
+*At no point does the client ever see the master key.*
+
+---
+
+## How to Test the Setup
+
+```bash
+# 1️⃣ Short‑hand route (still works)
+curl -i -X POST [https://cricket.lib.kth.se/qtc-proxy/search](https://cricket.lib.kth.se/qtc-proxy/search) \
+     -H "Content-Type: application/json" \
+     -d '{"q":"radio","limit":5}'
+
+# 2️⃣ Full MeiliSearch‑style route (now works)
+curl -i -X POST [https://cricket.lib.kth.se/qtc-proxy/indexes/QTC_json/search](https://cricket.lib.kth.se/qtc-proxy/indexes/QTC_json/search) \
+     -H "Content-Type: application/json" \
+     -d '{"q":"radio","limit":5}'
+Both commands should return HTTP 200 and a JSON body containing a "hits" array.
+You can also verify the health endpoint:
+curl -s [https://cricket.lib.kth.se/qtc-proxy/healthz](https://cricket.lib.kth.se/qtc-proxy/healthz)
+# → should output: OK
+Maintenance & Future Extensions
+TaskCommand / Note
+Reload NGINX after config change
+sudo nginx -t && sudo systemctl reload nginx
+Restart the proxy service
+sudo systemctl restart qtc-proxy.service
+Check proxy logs
+journalctl -u qtc-proxy -f
+Check NGINX error/access logs
+tail -f /var/log/nginx/error.logtail -f /var/log/nginx/access.log
+Renew TLS certs manually
+sudo certbot renew --dry-run
+Add another MeiliSearch index
+1. Update INDEX_NAME in the environment or pass a different <index> in the URL.2. (Optional) Extend forward_to_meilisearch to validate allowed indexes.
+Enable rate‑limiting
+Add a limit_req_zone in the http{} block and reference it inside location /qtc-proxy/.
+Add CORS for other origins
+Modify add_header Access-Control-Allow-Origin "*"; (or list specific domains) inside the /qtc-proxy/ block.
+Scale the Flask workers
+Change --workers 4 in the systemd ExecStart line, then systemctl daemon-reload && systemctl restart qtc-proxy.
+
+References & Useful Commands
+TopicResource / Command
+NGINX config test
+sudo nginx -t
+Systemd service status
+systemctl status qtc-proxy
+Gunicorn docs
+[https://docs.gunicorn.org/en/stable/](https://docs.gunicorn.org/en/stable/)
+MeiliSearch API
+[https://docs.meilisearch.com/reference/api/search.html](https://docs.meilisearch.com/reference/api/search.html)
+Certbot auto‑renewal
+cat /etc/cron.d/certbot or `systemctl list-timers
+Flask debugging
+Run python proxy.py locally (it listens on 127.0.0.1:8080).
+JSON pretty‑print
+jq . (install with apt install jq).
+
+TL;DR
+NGINX terminates TLS, serves static UI, and proxies /qtc-proxy/ to a local Flask app.
+Flask (proxy.py) injects the MeiliSearch master key, forwards the request, and returns the raw JSON.
+Systemd + Gunicorn keep the Flask app running reliably.
+The whole stack now works end‑to‑end, and the master key never leaves the server.
+Save the content above as README.md (or any .md filename) and you’ll have a complete, searchable documentation file for the current setup.
+
+Here is the cleaned, standard **raw Markdown** version of the provided text, with all rendering artifacts fixed, code blocks properly marked, consistent formatting, and all links presented in Markdown syntax:
+
+# 📚 Documentation – Lumo / Cricket QTC Search Proxy
+
+*Version: 1.0 · Date: 7 Sept 2025*
+
+***
+
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Architecture Diagram (textual)](#architecture-diagram-textual)
+3. [Components & Their Roles](#components--their-roles)
+4. [What Was Changed & Why](#what-was-changed--why)
+   - 4.1 [NGINX configuration](#nginx-configuration)
+   - 4.2 [`proxy.py` (Flask/Gunicorn)](#proxypy-flaskgunicorn)
+   - 4.3 [Systemd service for the proxy](#systemd-service-for-the-proxy)
+   - 4.4 [Certificate handling (Certbot)](#certificate-handling-certbot)
+5. [Request Flow – From Browser to MeiliSearch](#request-flow--from-browser-to-meilisearch)
+6. [How to Test the Setup](#how-to-test-the-setup)
+7. [Maintenance & Future Extensions](#maintenance--future-extensions)
+8. [References & Useful Commands](#references--useful-commands)
+
+***
+
+## Overview
+
+The goal was to expose a **secure, read‑only search API** for the QTC archive while **protecting the MeiliSearch master API key**.
+
+We achieved this by:
+
+- Adding an **NGINX reverse‑proxy location** (`/qtc-proxy/`) that forwards POST requests to a small **Flask** application.
+- The Flask app receives the client’s JSON payload, injects the master key, forwards the request to the **MeiliSearch** instance, and returns the raw JSON response.
+- The original public endpoint (`/qtc/`) continues to serve the static UI, while the new proxy endpoint (`/qtc-proxy/`) handles all search traffic.
+
+***
+
+## Architecture Diagram (textual)
+
+```
 
 +----------------------+          +----------------------+          +----------------------+
 |  User’s Browser      |  HTTPS   |  NGINX (frontend)   |  HTTP    |  Flask / Gunicorn    |
 |  (JS UI)             |--------->|  - Serves static UI  |--------->|  - proxy.py          |
 |  https://cricket...  |          |  - /qtc-proxy/       |          |  - injects master key|
 +----------------------+          +----------------------+          +----------+-----------+
-                                                                      |
-                                                                      | HTTP (localhost:7700)
-                                                                      v
-                                                            +----------------------+
-                                                            |  MeiliSearch         |
-                                                            |  http://127.0.0.1:7700|
-                                                            +----------------------+
+|
+| HTTP (localhost:7700)
+v
++----------------------+
+|  MeiliSearch         |
+|  http://127.0.0.1:7700|
++----------------------+
 
-All traffic between NGINX and the Flask app stays on the same host (loopback).
-Certificates are terminated at NGINX, so the Flask process never sees TLS.
-Components & Their Roles
-Component	Path / Service	Purpose
-NGINX	/etc/nginx/sites-available/cricket.lib.kth.se (symlinked in sites-enabled)	Terminates TLS, serves static files (/qtc/), proxies /qtc-proxy/ to Flask, enforces method whitelist, adds security headers.
-Flask app	/var/www/cricket.lib.kth.se/qtc-proxy/proxy.py	Receives JSON, adds Authorization: Bearer <MASTER_KEY>, forwards to MeiliSearch, returns JSON.
-Gunicorn	Systemd unit qtc-proxy.service (executes gunicorn -w 4 -b 127.0.0.1:8080 proxy:app)	Production‑grade WSGI server for the Flask app.
-MeiliSearch	http://127.0.0.1:7700 (installed separately)	Full‑text search engine storing the QTC documents.
-Certbot	/etc/letsencrypt/...	Automatically obtains/renews TLS certificates for cricket.lib.kth.se.
-Systemd	/etc/systemd/system/qtc-proxy.service	Manages the Gunicorn process (auto‑restart, logging).
-What Was Changed & Why
-4.1 NGINX configuration
+```
 
-    Removed duplicate server_name definitions – only one server_name cricket.lib.kth.se now exists for each listen port (80 & 443).
-    Added /qtc-proxy/ location
-        Limits allowed methods to GET, HEAD, POST, OPTIONS.
-        Strips the extra path segment and rewrites to /search or (if you keep the longer route) forwards the full URI unchanged.
-        Sets standard security headers (Strict-Transport-Security, X-Frame-Options, etc.).
-    Ensured proxy_pass points to the local Flask service (http://127.0.0.1:8080).
+*All traffic between NGINX and the Flask app stays on the same host (loopback).
+Certificates are terminated at NGINX, so the Flask process never sees TLS.*
 
-Result: No more “conflicting server name” warnings; the proxy endpoint is reachable.
-4.2 proxy.py (Flask/Gunicorn)
+***
 
-    Fixed syntax errors (imports, __name__, decorator commas).
-    Added two routes:
-        /search – the short‑hand route used by the UI.
-        /indexes/<index>/search – mirrors the native MeiliSearch API, allowing the UI (or any client) to call the canonical path (/qtc-proxy/indexes/QTC_json/search).
-    Centralised the forwarding logic in forward_to_meilisearch(payload, index_name) – injects the master key from the environment variable MEILI_MASTER_KEY.
-    Added robust error handling (returns generic {"error":"search failed"} with HTTP 502).
-    Included a simple health‑check endpoint (/healthz).
+## Components & Their Roles
 
-Result: The Flask app now correctly receives the client payload, adds authentication, forwards it, and returns the exact MeiliSearch JSON response.
-4.3 Systemd service for the proxy
+| Component     | Path / Service                                         | Purpose                                                                                                                                   |
+|:--------------|:-------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------|
+| **NGINX**     | `/etc/nginx/sites-available/cricket.lib.kth.se`<br>(symlinked in `sites-enabled`)        | Terminates TLS, serves static UI (`/qtc/`), proxies `/qtc-proxy/` to Flask, enforces method whitelist, adds security headers.             |
+| **Flask app** | `/var/www/cricket.lib.kth.se/qtc-proxy/proxy.py`       | Receives JSON, adds `Authorization: Bearer <MASTER_KEY>`, forwards to MeiliSearch, returns JSON.                                          |
+| **Gunicorn**  | Systemd unit `qtc-proxy.service`<br>(executes `gunicorn -w 4 -b 127.0.0.1:8080 proxy:app`) | Production‑grade WSGI server for the Flask app.                                                                                           |
+| **MeiliSearch** | `http://127.0.0.1:7700` (installed separately)       | Full‑text search engine storing the QTC documents.                                                                                        |
+| **Certbot**   | `/etc/letsencrypt/...`                                 | Automatically obtains/renews TLS certificates for `cricket.lib.kth.se`.                                                                   |
+| **Systemd**   | `/etc/systemd/system/qtc-proxy.service`                | Manages the Gunicorn process (auto-restart, logging).                                                                                     |
+
+***
+
+## What Was Changed & Why
+
+### 4.1 NGINX configuration
+
+- **Removed duplicate `server_name` definitions** – only one `server_name cricket.lib.kth.se` now exists for each listen port (80 & 443).
+- **Added `/qtc-proxy/` location**
+  - Limits allowed methods to `GET, HEAD, POST, OPTIONS`.
+  - Strips the extra path segment and rewrites to `/search` **or** (if you keep the longer route) forwards the full URI unchanged.
+  - Sets standard security headers (`Strict-Transport-Security`, `X-Frame-Options`, etc.).
+- **Ensured `proxy_pass` points to the local Flask service** (`http://127.0.0.1:8080`).
+
+_Result: No more “conflicting server name” warnings; the proxy endpoint is reachable._
+
+### 4.2 `proxy.py` (Flask/Gunicorn)
+
+- Fixed syntax errors (imports, `__name__`, decorator commas).
+- Added **two routes**:
+  - `/search` – the shorthand route used by the UI.
+  - `/indexes/<index>/search` – mirrors the native MeiliSearch API, allowing the UI (or any client) to call the canonical path (`/qtc-proxy/indexes/QTC_json/search`).
+- Centralised the forwarding logic in `forward_to_meilisearch(payload, index_name)` – injects the master key from the environment variable `MEILI_MASTER_KEY`.
+- Added robust error handling (returns generic `{"error":"search failed"}` with HTTP 502).
+- Included a simple health-check endpoint (`/healthz`).
+
+_Result: The Flask app now correctly receives the client payload, adds authentication, forwards it, and returns the exact MeiliSearch JSON response._
+
+### 4.3 Systemd service for the proxy
+
+```
 
 [Unit]
 Description=Gunicorn instance to serve QTC search proxy
@@ -89,31 +305,39 @@ ExecStart=/usr/local/bin/gunicorn --workers 4 --bind 127.0.0.1:8080 proxy:app
 [Install]
 WantedBy=multi-user.target
 
-Runs the Flask app under www-data, isolates the master key from the code base, and restarts automatically on failure.
-4.4 Certificate handling (Certbot)
+```
+*Runs the Flask app under `www-data`, isolates the master key from the code base, and restarts automatically on failure.*
 
-    certbot obtained a wildcard‑compatible certificate for cricket.lib.kth.se.
-    NGINX is configured to use the certs (ssl_certificate …; ssl_certificate_key …;).
-    Renewal is automated (certbot renew --quiet runs daily via systemd timer).
+### 4.4 Certificate handling (Certbot)
 
-Request Flow – From Browser to MeiliSearch
+- `certbot` obtained a wildcard-compatible certificate for `cricket.lib.kth.se`.
+- NGINX is configured to use the certs (`ssl_certificate …; ssl_certificate_key …;`).
+- Renewal is automated (`certbot renew --quiet` runs daily via systemd timer).
 
-    User clicks “Search” in the UI (served from /qtc/).
-    JavaScript issues a POST to https://cricket.lib.kth.se/qtc-proxy/search (or the longer /qtc-proxy/indexes/QTC_json/search).
-    NGINX receives the request:
-        Verifies the method is allowed.
-        Rewrites the URI (if using the short route) to /search or passes the full path unchanged.
-        Forwards the request to http://127.0.0.1:8080 (Gunicorn).
-    Gunicorn → Flask (proxy.py) parses the JSON payload.
-    Flask builds a new request to MeiliSearch at http://127.0.0.1:7700/indexes/QTC_json/search and adds the Authorization: Bearer <MASTER_KEY> header (read from the environment).
-    MeiliSearch processes the query and returns a JSON response (hits, pagination info, etc.).
-    Flask receives the response, passes it straight back to NGINX (no modification).
-    NGINX streams the JSON back to the browser.
-    The UI renders the results.
+***
 
-At no point does the client ever see the master key.
-How to Test the Setup
+## Request Flow – From Browser to MeiliSearch
 
+1. **User clicks “Search”** in the UI (served from `/qtc/`).
+2. JavaScript issues a **POST** to `https://cricket.lib.kth.se/qtc-proxy/search` (or the longer `/qtc-proxy/indexes/QTC_json/search`).
+3. **NGINX** receives the request:
+   - Verifies the method is allowed.
+   - Rewrites the URI (if using the short route) to `/search` **or** passes the full path unchanged.
+   - Forwards the request to `http://127.0.0.1:8080` (Gunicorn).
+4. **Gunicorn → Flask** (`proxy.py`) parses the JSON payload.
+5. Flask builds a new request to **MeiliSearch** at `http://127.0.0.1:7700/indexes/QTC_json/search` and **adds** the `Authorization: Bearer <MASTER_KEY>` header (read from the environment).
+6. MeiliSearch processes the query and returns a JSON response (hits, pagination info, etc.).
+7. Flask receives the response, **passes it straight back** to NGINX (no modification).
+8. NGINX streams the JSON back to the browser.
+9. The UI renders the results.
+
+*At no point does the client ever see the master key.*
+
+***
+
+## How to Test the Setup
+
+```bash
 # 1️⃣ Short‑hand route (still works)
 curl -i -X POST https://cricket.lib.kth.se/qtc-proxy/search \
      -H "Content-Type: application/json" \
@@ -123,42 +347,61 @@ curl -i -X POST https://cricket.lib.kth.se/qtc-proxy/search \
 curl -i -X POST https://cricket.lib.kth.se/qtc-proxy/indexes/QTC_json/search \
      -H "Content-Type: application/json" \
      -d '{"q":"radio","limit":5}'
+```
 
 Both commands should return HTTP 200 and a JSON body containing a "hits" array.
 
 You can also verify the health endpoint:
 
+```bash
 curl -s https://cricket.lib.kth.se/qtc-proxy/healthz
 # → should output: OK
+```
 
-Maintenance & Future Extensions
-Task	Command / Note
-Reload NGINX after config change	sudo nginx -t && sudo systemctl reload nginx
-Restart the proxy service	sudo systemctl restart qtc-proxy.service
-Check proxy logs	journalctl -u qtc-proxy -f
-Check NGINX error/access logs	tail -f /var/log/nginx/error.logtail -f /var/log/nginx/access.log
-Renew TLS certs manually	sudo certbot renew --dry-run
-Add another MeiliSearch index	1. Update INDEX_NAME in the environment or pass a different <index> in the URL.2. (Optional) Extend forward_to_meilisearch to validate allowed indexes.
-Enable rate‑limiting	Add a limit_req_zone in the http{} block and reference it inside location /qtc-proxy/.
-Add CORS for other origins	Modify add_header Access-Control-Allow-Origin "*"; (or list specific domains) inside the /qtc-proxy/ block.
-Scale the Flask workers	Change --workers 4 in the systemd ExecStart line, then systemctl daemon-reload && systemctl restart qtc-proxy.
-References & Useful Commands
-Topic	Resource / Command
-NGINX config test	sudo nginx -t
-Systemd service status	systemctl status qtc-proxy
-Gunicorn docs	https://docs.gunicorn.org/en/stable/
-MeiliSearch API	https://docs.meilisearch.com/reference/api/search.html
-Certbot auto‑renewal	cat /etc/cron.d/certbot or `systemctl list-timers
-Flask debugging	Run python proxy.py locally (it listens on 127.0.0.1:8080).
-JSON pretty‑print	jq . (install with apt install jq).
-TL;DR
 
-    NGINX terminates TLS, serves static UI, and proxies /qtc-proxy/ to a local Flask app.
-    Flask (proxy.py) injects the MeiliSearch master key, forwards the request, and returns the raw JSON.
-    Systemd + Gunicorn keep the Flask app running reliably.
-    The whole stack now works end‑to‑end, and the master key never leaves the server.
+***
 
-Feel free to extend the documentation, add diagrams, or adjust the config as your needs evolve. Happy searching!
+## Maintenance \& Future Extensions
+
+| Task / Command | Note |
+| :-- | :-- |
+| Reload NGINX after config change | `sudo nginx -t && sudo systemctl reload nginx` |
+| Restart the proxy service | `sudo systemctl restart qtc-proxy.service` |
+| Check proxy logs | `journalctl -u qtc-proxy -f` |
+| Check NGINX error/access logs | `tail -f /var/log/nginx/error.log`<br>`tail -f /var/log/nginx/access.log` |
+| Renew TLS certs manually | `sudo certbot renew --dry-run` |
+| Add another MeiliSearch index | 1. Update INDEX_NAME in the environment or pass a different <index> in the URL.<br>2. (Optional) Extend forward_to_meilisearch to validate allowed indexes. |
+| Enable rate‑limiting | Add a limit_req_zone in the http{} block and reference it inside location /qtc-proxy/. |
+| Add CORS for other origins | Modify `add_header Access-Control-Allow-Origin "*";` (or list specific domains) inside the /qtc-proxy/ block. |
+| Scale the Flask workers | Change --workers 4 in the systemd ExecStart line, then systemctl daemon-reload \&\& systemctl restart qtc-proxy. |
+
+
+***
+
+## References \& Useful Commands
+
+| Topic | Resource / Command |
+| :-- | :-- |
+| NGINX config test | `sudo nginx -t` |
+| Systemd service status | `systemctl status qtc-proxy` |
+| Gunicorn docs | [Gunicorn Documentation](https://docs.gunicorn.org/en/stable/) |
+| MeiliSearch API | [MeiliSearch API Reference](https://docs.meilisearch.com/reference/api/search.html) |
+| Certbot auto‑renewal | `cat /etc/cron.d/certbot` or `systemctl list-timers` |
+| Flask debugging | Run `python proxy.py` locally (listens on 127.0.0.1:8080). |
+| JSON pretty‑print | `jq .` (install with `apt install jq`). |
+
+
+***
+
+## TL;DR
+
+- NGINX terminates TLS, serves static UI, and proxies /qtc-proxy/ to a local Flask app.
+- Flask (`proxy.py`) injects the MeiliSearch master key, forwards the request, and returns the raw JSON.
+- Systemd + Gunicorn keep the Flask app running reliably.
+- The whole stack now works end-to-end, and the master key never leaves the server.
+
+_Save the content above as README.md (or any .md filename) and it will serve as complete, searchable documentation for the current setup._
+
 
 
 # QTC OCR
