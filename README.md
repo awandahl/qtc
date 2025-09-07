@@ -1,6 +1,4 @@
-<img src="https://r2cdn.perplexity.ai/pplx-full-logo-primary-dark%402x.png" style="height:64px;margin-right:32px"/>
 
-# hi there, i have this chunk of text which is coming from your competitor lumo and is a mix between raw markdown and rendered ditto. can you make raw markdown out of it? here is the chunk:   \# 📚 Documentation – Lumo / Cricket QTC Search Proxy
 
 *Version: 1.0 · Date: 7 Sept 2025*
 
